@@ -24,9 +24,6 @@ extern volatile enum STATE { Startup = 0, Standby, Work, Fault, Fault_sensed} st
 // nacin delovanja
 extern volatile enum MODE  { Position = 0, Speed, Torque, Open_loop} mode;
 
-// nacin delovanja
-extern volatile enum TYPE  { PMSM = 0, BLDC} type;
-
 // kašen referenèen signal imam
 extern volatile enum REF_TYPE {Step = 0, Slew, Konst, Sine} ref_type;
 

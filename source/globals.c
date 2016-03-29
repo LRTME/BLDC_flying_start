@@ -18,9 +18,6 @@ volatile enum STATE state = Startup;
 // nacin delovanja
 volatile enum MODE mode = Speed;
 
-// nacin delovanja
-volatile enum TYPE type = PMSM;
-
 // kašen referenèen signal imam
 volatile enum REF_TYPE ref_type = Konst;
 

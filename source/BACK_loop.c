@@ -203,15 +203,6 @@ void standby_fcn(void)
         {
             DINT;
             mode = Open_loop;
-            // zamenjam naèin vodenja
-            /*if (type == BLDC)
-            {
-                type = PMSM;
-            }
-            else
-            {
-                type = BLDC;
-            }*/
             EINT;
         }
         else if (mode == Speed)

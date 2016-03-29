@@ -15,11 +15,7 @@
 //  širina nasièenja
 #define     POT_SATURATION_WIDTH    0.02
 
-// tokovna regulatorja
-PID_float   reg_id = PID_FLOAT_DEFAULTS;
-PID_float   reg_iq = PID_FLOAT_DEFAULTS;
-
-// tokovna regulator za bldc
+// tokovni regulator za bldc
 PID_float   reg_idc = PID_FLOAT_DEFAULTS;
 
 // hitrostni regulator
@@ -34,7 +30,6 @@ RDIF_float  diff_speed = RDIF_FLOAT_DEFAULTS;
 // transofrmacije
 PARK_float      park_tok = PARK_FLOAT_DEFAULTS;
 CLARKE_float    clarke_tok = CLARKE_FLOAT_DEFAULTS;
-IPARK_float     ipark_napetost = IPARK_FLOAT_DEFAULTS;
 
 // AB filter za izraèun hitrosti
 ABF_float       ab_tracker = ABF_FLOAT_DEFAULTS;
@@ -83,9 +78,6 @@ float   tok_i3_offset_calib = 0.0;
 float   tok_i1_gain = -(10.0/13.5) * (6.2/7.5)*((3.3 * 15.0)/(0.625 * 4096));
 float   tok_i2_gain = -(10.0/13.5) * (6.2/7.5)*((3.3 * 15.0)/(0.625 * 4096));
 float   tok_i3_gain = -(10.0/13.5) * (6.2/7.5)*((3.3 * 15.0)/(0.625 * 4096));
-
-float   tok_d = 0.0;
-float   tok_q = 0.0;
 
 long    current_offset_counter = 0;
 
@@ -198,7 +190,7 @@ void interrupt PER_int(void)
     ref_position = ref_out;
 
     // izracunam navor
-    navor = (3.0 * POLE_PAIRS / 2.0) * (FLUX * tok_q + (L_D - L_Q) * tok_d * tok_q);
+    navor = (3.0 * POLE_PAIRS / 2.0) * (FLUX * park_tok.Qs + (L_D - L_Q) * park_tok.Ds * park_tok.Qs);
 
     check_limits();
 
@@ -291,8 +283,8 @@ void PER_int_setup(void)
     ab_tracker.Sampling_period = SAMPLE_TIME;
 
     // inicializiram data logger
-    dlog.iptr1 = &reg_iq.Ref;
-    dlog.iptr2 = &reg_iq.Fdb;
+    dlog.iptr1 = &reg_idc.Ref;
+    dlog.iptr2 = &reg_idc.Fdb;
     dlog.iptr3 = &tok_i2;
     dlog.iptr4 = &tok_i3;
 
@@ -303,21 +295,6 @@ void PER_int_setup(void)
     dlog.prescalar = 1;
     dlog.mode = Normal;
 
-
-    // inicializiram tokovna regulatorja
-    reg_id.Kp = 0.05;
-    reg_id.Ki = 1000.0;
-    reg_id.Kd = 0.0;
-    reg_id.OutMax = +0.95;
-    reg_id.OutMin = -0.95;
-    reg_id.Sampling_period = SAMPLE_TIME;
-
-    reg_iq.Kp = reg_id.Kp;
-    reg_iq.Ki = reg_id.Ki;
-    reg_iq.Kd = reg_id.Kd;
-    reg_iq.OutMax = reg_id.OutMax;
-    reg_iq.OutMin = reg_id.OutMin;
-    reg_iq.Sampling_period = reg_id.Sampling_period;
 
     reg_idc.Kp = 0.05;
     reg_idc.Ki = 1000.0;
@@ -388,193 +365,67 @@ void motor_control(void)
     // ce delam, potem reguliram
     if (state == Work)
     {
-        // BLDC
-        if (type == BLDC)
+        if (mode == Open_loop)
         {
-            if (mode == Open_loop)
-            {
-                // samo za test BLDC-delovanja
-                SVM_update_bldc(ref_open_loop, sektor);
-            }
-            if (mode == Torque)
-            {
-                // samo dokler smo pod nazivno hitrostjo
-                reg_idc.Ref = 2 * ref_torque / (FLUX * POLE_PAIRS * 3);
-                if (speed_meh_ctrl > (+SPEED_MAX))
-                {
-                    reg_idc.Ref = 0.0;
-                }
-                if (speed_meh_ctrl < (-SPEED_MAX))
-                {
-                    reg_idc.Ref = 0.0;
-                }
-
-                reg_idc.Fdb = tok_dc;
-                PID_FLOAT_CALC(reg_idc);
-
-
-                // samo za test BLDC-delovanja
-                SVM_update_bldc(reg_idc.Out, sektor);
-            }
-            if (mode == Speed)
-            {
-                reg_speed.Ref = ref_speed;
-                reg_speed.Fdb = speed_meh_ctrl;
-                PID_FLOAT_CALC(reg_speed);
-
-                reg_idc.Ref = 2 * reg_speed.Out / (3 * POLE_PAIRS * FLUX);
-                reg_idc.Fdb = tok_dc;
-                PID_FLOAT_CALC(reg_idc);
-
-                // samo za test BLDC-delovanja
-                SVM_update_bldc(reg_idc.Out, sektor);
-            }
-            if (mode == Position)
-            {
-                reg_position.Ref = ref_position;
-                reg_position.Fdb = position;
-                PID_FLOAT_CALC(reg_position);
-
-                // hitrostna regulacija
-                reg_speed.Ref = reg_position.Out;
-                reg_speed.Fdb = speed_meh_ctrl;
-                PID_FLOAT_CALC(reg_speed);
-
-                reg_idc.Ref = 2 * reg_speed.Out / (3 * POLE_PAIRS * FLUX);
-                reg_idc.Fdb = tok_dc;
-                PID_FLOAT_CALC(reg_idc);
-
-                // samo za test BLDC-delovanja
-                SVM_update_bldc(reg_idc.Out, sektor);
-            }
+            // samo za test BLDC-delovanja
+            SVM_update_bldc(ref_open_loop, sektor);
         }
-
-        // FOC
-        if (type == PMSM)
+        if (mode == Torque)
         {
-            if (mode == Open_loop)
+            // samo dokler smo pod nazivno hitrostjo
+            reg_idc.Ref = 2 * ref_torque / (FLUX * POLE_PAIRS * 3);
+            if (speed_meh_ctrl > (+SPEED_MAX))
             {
-                // inverzni park
-                ipark_napetost.Angle = kot_el * 2 * PI;
-                ipark_napetost.Ds = 0;
-                ipark_napetost.Qs = ref_open_loop;
-                IPARK_FLOAT_CALC(ipark_napetost);
-
-                ipark_napetost.Alpha = ipark_napetost.Alpha;
-                ipark_napetost.Beta = ipark_napetost.Beta;
-
-                SVM_update(ipark_napetost.Alpha, ipark_napetost.Beta);
+                reg_idc.Ref = 0.0;
+            }
+            if (speed_meh_ctrl < (-SPEED_MAX))
+            {
+                reg_idc.Ref = 0.0;
             }
 
-            // navorna regulacija
-            if (mode == Torque)
-            {
-                // samo dokler smo pod nazivno hitrostjo
-                reg_iq.Ref = 2 * ref_torque / (3 * POLE_PAIRS * FLUX);
-                if (speed_meh_ctrl > (+SPEED_MAX))
-                {
-                    reg_iq.Ref = 0.0;
-                }
-                if (speed_meh_ctrl < (-SPEED_MAX))
-                {
-                    reg_iq.Ref = 0.0;
-                }
+            reg_idc.Fdb = tok_dc;
+            PID_FLOAT_CALC(reg_idc);
 
-                // tokovna regulacija
-                reg_id.Ref = 0.0;
-                reg_id.Fdb = tok_d;
-                PID_FLOAT_CALC(reg_id);
 
-                reg_iq.Fdb = tok_q;
-                PID_FLOAT_CALC(reg_iq);
+            // samo za test BLDC-delovanja
+            SVM_update_bldc(reg_idc.Out, sektor);
+        }
+        if (mode == Speed)
+        {
+            reg_speed.Ref = ref_speed;
+            reg_speed.Fdb = speed_meh_ctrl;
+            PID_FLOAT_CALC(reg_speed);
 
-                // inverzni park
-                ipark_napetost.Angle = kot_el * 2 * PI;
-                ipark_napetost.Ds = reg_id.Out;
-                ipark_napetost.Qs = reg_iq.Out;
-                IPARK_FLOAT_CALC(ipark_napetost);
+            reg_idc.Ref = 2 * reg_speed.Out / (3 * POLE_PAIRS * FLUX);
+            reg_idc.Fdb = tok_dc;
+            PID_FLOAT_CALC(reg_idc);
 
-                ipark_napetost.Alpha = ipark_napetost.Alpha;
-                ipark_napetost.Beta = ipark_napetost.Beta;
-
-                SVM_update(ipark_napetost.Alpha, ipark_napetost.Beta);
-            }
+            // samo za test BLDC-delovanja
+            SVM_update_bldc(reg_idc.Out, sektor);
+        }
+        if (mode == Position)
+        {
+            reg_position.Ref = ref_position;
+            reg_position.Fdb = position;
+            PID_FLOAT_CALC(reg_position);
 
             // hitrostna regulacija
-            if (mode == Speed)
-            {
-                // generator zeljene vrednosti - za testiranje regulatorjev
+            reg_speed.Ref = reg_position.Out;
+            reg_speed.Fdb = speed_meh_ctrl;
+            PID_FLOAT_CALC(reg_speed);
 
-                reg_speed.Ref = ref_speed;
-                reg_speed.Fdb = speed_meh_ctrl;
-                PID_FLOAT_CALC(reg_speed);
+            reg_idc.Ref = 2 * reg_speed.Out / (3 * POLE_PAIRS * FLUX);
+            reg_idc.Fdb = tok_dc;
+            PID_FLOAT_CALC(reg_idc);
 
-                // tokovna regulacija
-                reg_id.Ref = 0.0;
-                reg_id.Fdb = tok_d;
-                PID_FLOAT_CALC(reg_id);
-
-                reg_iq.Ref = 2 * reg_speed.Out / (FLUX * POLE_PAIRS * 3);
-                reg_iq.Fdb = tok_q;
-                PID_FLOAT_CALC(reg_iq);
-
-                // inverzni park
-                ipark_napetost.Angle = kot_el * 2 * PI;
-                ipark_napetost.Ds = reg_id.Out;
-                ipark_napetost.Qs = reg_iq.Out;
-                IPARK_FLOAT_CALC(ipark_napetost);
-
-                if (debug_encoder == TRUE)
-                {
-                    debug_duty = komanda;
-                    SVM_update(debug_duty, 0.0);
-                }
-
-                else
-                {
-                    ipark_napetost.Alpha = ipark_napetost.Alpha;
-                    ipark_napetost.Beta = ipark_napetost.Beta;
-
-                    SVM_update(ipark_napetost.Alpha, ipark_napetost.Beta);
-                }
-
-            }
-            if (mode == Position)
-            {
-                reg_position.Ref = ref_position;
-                reg_position.Fdb = position;
-                PID_FLOAT_CALC(reg_position);
-
-                reg_speed.Ref = reg_position.Out;
-                reg_speed.Fdb = speed_meh_ctrl;
-                PID_FLOAT_CALC(reg_speed);
-
-                // tokovna regulacija
-                reg_id.Ref = 0.0;
-                reg_id.Fdb = tok_d;
-                PID_FLOAT_CALC(reg_id);
-
-                reg_iq.Ref = 2 * reg_speed.Out / (FLUX * POLE_PAIRS * 3);
-                reg_iq.Fdb = tok_q;
-                PID_FLOAT_CALC(reg_iq);
-
-                // inverzni park
-                ipark_napetost.Angle = kot_el * 2 * PI;
-                ipark_napetost.Ds = reg_id.Out;
-                ipark_napetost.Qs = reg_iq.Out;
-                IPARK_FLOAT_CALC(ipark_napetost);
-
-                SVM_update(ipark_napetost.Alpha, ipark_napetost.Beta);
-            }
+            // samo za test BLDC-delovanja
+            SVM_update_bldc(reg_idc.Out, sektor);
         }
-
     }
     if (state == Standby)
     {
         reg_position.Ui = 0.0;
         reg_speed.Ui = 0.0;
-        reg_id.Ui = 0.0;
-        reg_iq.Ui = 0.0;
 
         reg_idc.Ui = 0.0;
 
@@ -690,8 +541,6 @@ void get_electrical(void)
     park_tok.Beta = clarke_tok.Beta;
     park_tok.Angle = kot_el * (2 * PI);
     PARK_FLOAT_CALC(park_tok);
-    tok_d = park_tok.Ds;
-    tok_q = park_tok.Qs;
 
     // tok dc
     switch((int)sektor)
